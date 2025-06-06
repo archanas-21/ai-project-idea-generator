@@ -1,0 +1,1059 @@
+import streamlit as st
+import random
+import pandas as pd
+import json
+from datetime import datetime
+import base64
+from io import BytesIO
+import google.generativeai as genai
+import re
+import streamlit.components.v1 as components
+import os
+
+# Set page configuration
+st.set_page_config(
+    page_title="AI Project Idea Generator",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS to improve UI
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    .stExpander {
+        border-radius: 8px;
+        border: 1px solid #f0f2f6;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+    }
+    .stButton button {
+        border-radius: 20px;
+        border: none;
+        padding: 0.5rem 1rem;
+        transition: all 0.3s ease;
+    }
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .big-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+    }
+    .highlight {
+        background: linear-gradient(90deg, #4CAF50, #2196F3);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+    }
+    .card {
+        padding: 1.5rem;
+        border-radius: 10px;
+        background: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+    }
+    .resource-card {
+        background: #000000;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+    }
+    .step-number {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 30px;
+        margin-right: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Application title and description
+st.markdown("<h1 class='big-header'>🚀 <span class='highlight'>Student Project Idea Generator</span></h1>", unsafe_allow_html=True)
+st.markdown("### Generate AI-powered project ideas with interactive roadmaps based on your interests and skills")
+
+# Initialize session state for storing generated ideas
+if 'generated_ideas' not in st.session_state:
+    st.session_state.generated_ideas = []
+if 'selected_idea' not in st.session_state:
+    st.session_state.selected_idea = None
+if 'roadmap' not in st.session_state:
+    st.session_state.roadmap = None
+if 'api_key_configured' not in st.session_state:
+    st.session_state.api_key_configured = False
+if 'visualization_mode' not in st.session_state:
+    st.session_state.visualization_mode = "ideas"  # Can be "ideas" or "roadmap"
+
+# P5.js Visualization Components
+def create_ideas_visualization(ideas_data):
+    """Create p5.js visualization for project ideas"""
+    # Convert ideas data to a JSON string that can be used in JavaScript
+    if not ideas_data:
+        ideas_data = []
+    
+    ideas_json = json.dumps(ideas_data)
+    
+    # Create a p5.js sketch for visualizing ideas
+    p5_code = f"""
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <div id="p5-idea-container" style="width: 100%; height: 300px;"></div>
+    <script>
+        const ideasData = {ideas_json};
+        
+        function getColorForDifficulty(difficulty) {{
+            if (difficulty === "Beginner") return "#4CAF50";
+            if (difficulty === "Intermediate") return "#FFC107";
+            return "#F44336"; // Advanced
+        }}
+        
+        new p5(function(p) {{
+            let bubbles = [];
+            let font;
+            
+            p.setup = function() {{
+                let canvas = p.createCanvas(p.windowWidth * 0.9, 300);
+                canvas.parent('p5-idea-container');
+                
+                // Create bubble for each idea
+                for (let i = 0; i < ideasData.length; i++) {{
+                    bubbles.push({{
+                        x: p.random(100, p.width - 100),
+                        y: p.random(100, p.height - 100),
+                        radius: p.map(ideasData[i].tools.length, 2, 6, 40, 70),
+                        color: getColorForDifficulty(ideasData[i].difficulty),
+                        title: ideasData[i].title,
+                        index: i,
+                        vx: p.random(-1, 1),
+                        vy: p.random(-1, 1)
+                    }});
+                }}
+            }};
+            
+            p.draw = function() {{
+                p.background(245);
+                
+                // Draw connecting lines between bubbles
+                p.stroke(200);
+                p.strokeWeight(1);
+                for (let i = 0; i < bubbles.length; i++) {{
+                    for (let j = i + 1; j < bubbles.length; j++) {{
+                        p.line(bubbles[i].x, bubbles[i].y, bubbles[j].x, bubbles[j].y);
+                    }}
+                }}
+                
+                // Draw and update bubbles
+                for (let bubble of bubbles) {{
+                    // Move bubble
+                    bubble.x += bubble.vx;
+                    bubble.y += bubble.vy;
+                    
+                    // Bounce off edges
+                    if (bubble.x < bubble.radius || bubble.x > p.width - bubble.radius) bubble.vx *= -1;
+                    if (bubble.y < bubble.radius || bubble.y > p.height - bubble.radius) bubble.vy *= -1;
+                    
+                    // Draw bubble
+                    p.fill(bubble.color + '80');  // Add transparency
+                    p.stroke(bubble.color);
+                    p.strokeWeight(2);
+                    p.ellipse(bubble.x, bubble.y, bubble.radius * 2);
+                    
+                    // Draw number
+                    p.fill(255);
+                    p.stroke(0);
+                    p.strokeWeight(1);
+                    p.textAlign(p.CENTER, p.CENTER);
+                    p.textSize(16);
+                    p.text(bubble.index + 1, bubble.x, bubble.y);
+                }}
+                
+                // Draw legend
+                p.fill(0);
+                p.noStroke();
+                p.textAlign(p.LEFT, p.CENTER);
+                p.textSize(14);
+                p.text("Difficulty:", 20, 30);
+                
+                p.fill("#4CAF50");
+                p.circle(100, 30, 20);
+                p.fill(0);
+                p.text("Beginner", 115, 30);
+                
+                p.fill("#FFC107");
+                p.circle(190, 30, 20);
+                p.fill(0);
+                p.text("Intermediate", 205, 30);
+                
+                p.fill("#F44336");
+                p.circle(300, 30, 20);
+                p.fill(0);
+                p.text("Advanced", 315, 30);
+            }};
+            
+            p.windowResized = function() {{
+                p.resizeCanvas(p.windowWidth * 0.9, 300);
+            }};
+        }});
+    </script>
+    """
+    
+    return p5_code
+
+def create_roadmap_visualization(roadmap_data, project_title):
+    """Create p5.js visualization for project roadmap"""
+    if not roadmap_data:
+        roadmap_data = []
+    
+    roadmap_json = json.dumps(roadmap_data)
+    
+    p5_code = f"""
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <div id="p5-roadmap-container" style="width: 100%; height: 400px;"></div>
+    <script>
+        const roadmapData = {roadmap_json};
+        const projectTitle = "{project_title}";
+        
+        new p5(function(p) {{
+            let nodeSpacing;
+            let roadmapStartX;
+            let roadmapStartY;
+            let nodeRadius = 30;
+            let hoveredNode = -1;
+            
+            p.setup = function() {{
+                let canvas = p.createCanvas(p.windowWidth * 0.9, 400);
+                canvas.parent('p5-roadmap-container');
+                nodeSpacing = p.width / (roadmapData.length + 1);
+                roadmapStartX = nodeSpacing;
+                roadmapStartY = p.height / 2;
+            }};
+            
+            p.draw = function() {{
+                p.background(245);
+                
+                // Draw title
+                p.fill(0);
+                p.textAlign(p.CENTER, p.TOP);
+                p.textSize(24);
+                p.text("Roadmap: " + projectTitle, p.width/2, 20);
+                
+                // Draw roadmap path
+                p.stroke(100);
+                p.strokeWeight(4);
+                p.line(roadmapStartX - 50, roadmapStartY, 
+                       roadmapStartX + (roadmapData.length - 1) * nodeSpacing + 50, roadmapStartY);
+                
+                // Check for hover
+                hoveredNode = -1;
+                for (let i = 0; i < roadmapData.length; i++) {{
+                    let nodeX = roadmapStartX + i * nodeSpacing;
+                    let d = p.dist(p.mouseX, p.mouseY, nodeX, roadmapStartY);
+                    if (d < nodeRadius) {{
+                        hoveredNode = i;
+                        break;
+                    }}
+                }}
+                
+                // Draw nodes
+                for (let i = 0; i < roadmapData.length; i++) {{
+                    let nodeX = roadmapStartX + i * nodeSpacing;
+                    
+                    // Draw node
+                    if (i === hoveredNode) {{
+                        p.fill('#2196F3');
+                        p.strokeWeight(3);
+                        p.stroke(255);
+                        // Make hovered node larger
+                        p.ellipse(nodeX, roadmapStartY, nodeRadius * 2 + 10);
+                    }} else {{
+                        p.fill('#4CAF50');
+                        p.strokeWeight(2);
+                        p.stroke(255);
+                        p.ellipse(nodeX, roadmapStartY, nodeRadius * 2);
+                    }}
+                    
+                    // Draw week number
+                    p.fill(255);
+                    p.noStroke();
+                    p.textAlign(p.CENTER, p.CENTER);
+                    p.textSize(14);
+                    // Extract week number (e.g. "Week 1" -> "1")
+                    let weekNum = roadmapData[i].week.replace("Week ", "");
+                    p.text(weekNum, nodeX, roadmapStartY);
+                    
+                    // Draw week title below the timeline
+                    p.fill(0);
+                    p.textAlign(p.CENTER, p.TOP);
+                    p.textSize(12);
+                    let parts = roadmapData[i].title.split(" ");
+                    let displayTitle = parts.length > 3 ? parts.slice(0, 3).join(" ") + "..." : roadmapData[i].title;
+                    p.text(displayTitle, nodeX, roadmapStartY + nodeRadius + 10);
+                }}
+                
+                // Display detailed info for hovered node
+                if (hoveredNode >= 0) {{
+                    let node = roadmapData[hoveredNode];
+                    let infoX = 20;
+                    let infoY = roadmapStartY + nodeRadius * 2 + 40;
+                    let infoWidth = p.width - 40;
+                    let infoHeight = 120;
+                    
+                    // Draw info box
+                    p.fill(255);
+                    p.stroke(200);
+                    p.strokeWeight(1);
+                    p.rect(infoX, infoY, infoWidth, infoHeight, 10);
+                    
+                    // Draw info content
+                    p.fill(0);
+                    p.noStroke();
+                    p.textAlign(p.LEFT, p.TOP);
+                    p.textSize(16);
+                    p.text(node.week + ": " + node.title, infoX + 15, infoY + 15);
+                    
+                    // Draw tasks
+                    p.textSize(14);
+                    p.text("Tasks:", infoX + 15, infoY + 40);
+                    p.textSize(12);
+                    for (let i = 0; i < Math.min(node.tasks.length, 3); i++) {{
+                        p.text("• " + node.tasks[i], infoX + 30, infoY + 60 + i * 15);
+                    }}
+                    if (node.tasks.length > 3) {{
+                        p.text("• ...", infoX + 30, infoY + 60 + 3 * 15);
+                    }}
+                }}
+            }};
+            
+            p.windowResized = function() {{
+                p.resizeCanvas(p.windowWidth * 0.9, 400);
+                nodeSpacing = p.width / (roadmapData.length + 1);
+                roadmapStartX = nodeSpacing;
+            }};
+        }});
+    </script>
+    """
+    
+    return p5_code
+
+# Gemini API Configuration
+with st.sidebar:
+    # st.header("API Configuration")
+    gemini_api_key = "AIzaSyBf9mkSpiiabc0bE6C8byYWIHBJ8bF_1mA"
+    
+    if gemini_api_key:
+        try:
+            # Configure the Gemini API with the provided key
+            genai.configure(api_key=gemini_api_key)
+            st.session_state.api_key_configured = True
+            st.success("API key configured successfully!")
+        except Exception as e:
+            st.error(f"Error configuring API: {str(e)}")
+            st.session_state.api_key_configured = False
+
+# Function to generate project ideas using Gemini AI
+def generate_ai_project_ideas(field, academic_level, skills, project_type):
+    try:
+        # Create a prompt for the Gemini API
+        prompt = f"""
+        Generate 5 project ideas for a student with the following characteristics:
+        - Field of Interest: {field}
+        - Academic Level: {academic_level}
+        - Skills Known: {', '.join(skills) if skills else 'Beginner level'}
+        - Type of Project: {project_type}
+        
+        For each project idea, provide the following information in a structured format:
+        1. Title: A concise, descriptive name for the project
+        2. Description: A brief explanation of what the project does and its purpose
+        3. Tools: A list of 3-5 specific technologies, frameworks, or languages needed for the project
+        4. Difficulty: A rating (Beginner, Intermediate, or Advanced)
+        
+        Format each project idea as a JSON object. Return ONLY a valid JSON array containing the 5 project ideas without any additional text or explanation.
+        Example of expected format:
+        [
+            {{
+                "title": "Project Title",
+                "description": "Project description...",
+                "tools": ["Tool1", "Tool2", "Tool3"],
+                "difficulty": "Intermediate"
+            }},
+            ...
+        ]
+        """
+        
+        # Configure the generative model
+        generation_config = {
+            "temperature": 0.9,
+            "top_p": 1,
+            "top_k": 32,
+            "max_output_tokens": 2048,
+        }
+        
+        # Initialize the Gemini model
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config=generation_config
+        )
+        
+        # Generate content
+        response = model.generate_content(prompt)
+        response_text = response.text
+        
+        # Extract JSON from the response
+        # Sometimes the API might include markdown code block indicators
+        json_pattern = r'json\s*([\s\S]*?)\s*|\s*([\s\S]*?)\s*|\[\s*{\s*"title"[\s\S]?\}\s\]'
+        json_match = re.search(json_pattern, response_text)
+        
+        if json_match:
+            # Use the group that matched (either inside json code block or regular code block)
+            json_str = json_match.group(1) or json_match.group(2) or json_match.group(0)
+        else:
+            # If no code block found, try to use the whole response
+            json_str = response_text
+        
+        # Clean up the JSON string to ensure it's valid
+        json_str = json_str.strip()
+        if not json_str.startswith('['):
+            json_str = '[' + json_str
+        if not json_str.endswith(']'):
+            json_str = json_str + ']'
+            
+        # Parse the JSON string
+        project_ideas = json.loads(json_str)
+        return project_ideas
+        
+    except Exception as e:
+        st.error(f"Error generating project ideas: {str(e)}")
+        return []
+
+# Function to generate project roadmap using Gemini AI
+def generate_ai_roadmap(project):
+    try:
+        # Create a prompt for the Gemini API
+        prompt = f"""
+        Generate a detailed roadmap for the following project:
+        
+        Project Title: {project['title']}
+        Description: {project['description']}
+        Tools: {', '.join(project['tools'])}
+        Difficulty: {project['difficulty']}
+        
+        Create a week-by-week roadmap with tasks and learning resources. Structure the roadmap as follows:
+        
+        Week 1: Planning and Setup
+        Week 2: Core Functionality Development - Part 1
+        Week 3: Core Functionality Development - Part 2
+        Week 4: Advanced Features
+        Week 5: Integration
+        Week 6: Testing and Refinement
+        Week 7: Documentation
+        Week 8: Deployment
+        
+        For each week period, provide:
+        1. A title for the week's focus
+        2. 4-5 specific tasks to complete
+        3. 2-3 specific learning resources (books, courses, tutorials) for the required skills
+        
+        Format the roadmap as a JSON array of week objects. Return ONLY a valid JSON array without any additional text or explanation.
+        Example of expected format:
+        [
+            {{
+                "week": "Week 1",
+                "title": "Planning and Environment Setup",
+                "tasks": ["Task1", "Task2", "Task3", "Task4"],
+                "resources": ["Resource1", "Resource2", "Resource3"]
+            }},
+            ...
+        ]
+        """
+        
+        # Configure the generative model
+        generation_config = {
+            "temperature": 0.7,
+            "top_p": 1,
+            "top_k": 32,
+            "max_output_tokens": 2048,
+        }
+        
+        # Initialize the Gemini model
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config=generation_config
+        )
+        
+        # Generate content
+        response = model.generate_content(prompt)
+        response_text = response.text
+        
+        # Extract JSON from the response
+        json_pattern = r'json\s*([\s\S]*?)\s*|\s*([\s\S]*?)\s*|\[\s*{\s*"week"[\s\S]?\}\s\]'
+        json_match = re.search(json_pattern, response_text)
+        
+        if json_match:
+            # Use the group that matched (either inside json code block or regular code block)
+            json_str = json_match.group(1) or json_match.group(2) or json_match.group(0)
+        else:
+            # If no code block found, try to use the whole response
+            json_str = response_text
+            
+        # Clean up the JSON string to ensure it's valid
+        json_str = json_str.strip()
+        if not json_str.startswith('['):
+            json_str = '[' + json_str
+        if not json_str.endswith(']'):
+            json_str = json_str + ']'
+            
+        # Parse the JSON string
+        roadmap = json.loads(json_str)
+        return roadmap
+        
+    except Exception as e:
+        st.error(f"Error generating roadmap: {str(e)}")
+        return []
+
+# Function to generate hybrid project ideas
+def generate_hybrid_ideas(primary_field, secondary_field, skills):
+    try:
+        # Create a prompt for the Gemini API
+        prompt = f"""
+        Generate 3 interdisciplinary project ideas that combine these two domains:
+        
+        Primary Domain: {primary_field}
+        Secondary Domain: {secondary_field}
+        Skills Known: {', '.join(skills) if skills else 'Beginner level'}
+        
+        For each hybrid project idea, provide:
+        1. Title: A concise, descriptive name for the project
+        2. Description: Brief explanation of what the project does and how it combines both domains
+        3. Tools: List of 3-5 specific technologies, frameworks, or languages needed for the project
+        4. Difficulty: A rating (Beginner, Intermediate, or Advanced)
+        5. Domains: The two domains being combined
+        
+        Format each project idea as a JSON object. Return ONLY a valid JSON array containing the 3 project ideas.
+        Example of expected format:
+        [
+            {{
+                "title": "Project Title",
+                "description": "Project description...",
+                "tools": ["Tool1", "Tool2", "Tool3"],
+                "difficulty": "Intermediate",
+                "domains": ["Domain1", "Domain2"]
+            }},
+            ...
+        ]
+        """
+        
+        # Initialize the Gemini model
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        
+        # Generate content
+        response = model.generate_content(prompt)
+        response_text = response.text
+        
+        # Extract JSON from the response
+        json_pattern = r'json\s*([\s\S]*?)\s*|\s*([\s\S]*?)\s*|\[\s*{\s*"title"[\s\S]?\}\s\]'
+        json_match = re.search(json_pattern, response_text)
+        
+        if json_match:
+            json_str = json_match.group(1) or json_match.group(2) or json_match.group(0)
+        else:
+            json_str = response_text
+            
+        # Clean up the JSON string
+        json_str = json_str.strip()
+        if not json_str.startswith('['):
+            json_str = '[' + json_str
+        if not json_str.endswith(']'):
+            json_str = json_str + ']'
+            
+        # Parse the JSON string
+        hybrid_ideas = json.loads(json_str)
+        return hybrid_ideas
+        
+    except Exception as e:
+        st.error(f"Error generating hybrid ideas: {str(e)}")
+        return []
+
+# Function to generate PDF export
+def create_download_link(val, filename):
+    b64 = base64.b64encode(val)
+    return f'<a href="data:application/octet-stream;base64,{b64.decode()}" download="{filename}" class="download-btn">Download Project Plan</a>'
+
+def export_to_pdf(idea, roadmap):
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+        
+        styles = getSampleStyleSheet()
+        title_style = styles['Title']
+        heading_style = styles['Heading1']
+        subheading_style = styles['Heading2']
+        normal_style = styles['Normal']
+        
+        # Add project title
+        elements.append(Paragraph(f"Project Plan: {idea['title']}", title_style))
+        elements.append(Spacer(1, 12))
+        
+        # Add project description
+        elements.append(Paragraph("Project Description:", heading_style))
+        elements.append(Paragraph(idea['description'], normal_style))
+        elements.append(Spacer(1, 12))
+        
+        # Add tools needed
+        elements.append(Paragraph("Tools & Technologies:", heading_style))
+        tools_text = ", ".join(idea['tools'])
+        elements.append(Paragraph(tools_text, normal_style))
+        elements.append(Spacer(1, 12))
+        
+        # Add difficulty level
+        elements.append(Paragraph("Difficulty Level:", heading_style))
+        elements.append(Paragraph(idea['difficulty'], normal_style))
+        elements.append(Spacer(1, 24))
+        
+        # Add roadmap
+        elements.append(Paragraph("Project Roadmap", heading_style))
+        elements.append(Spacer(1, 12))
+        
+        for week in roadmap:
+            elements.append(Paragraph(f"{week['week']}: {week['title']}", subheading_style))
+            
+            # Add tasks
+            elements.append(Paragraph("Tasks:", styles['Heading3']))
+            for task in week['tasks']:
+                elements.append(Paragraph(f"• {task}", normal_style))
+            
+            # Add resources
+            elements.append(Paragraph("Learning Resources:", styles['Heading3']))
+            for resource in week['resources']:
+                elements.append(Paragraph(f"• {resource}", normal_style))
+            
+            elements.append(Spacer(1, 12))
+        
+        # Add timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        elements.append(Spacer(1, 36))
+        elements.append(Paragraph(f"Generated on: {timestamp}", normal_style))
+        
+        # Build PDF
+        doc.build(elements)
+        pdf = buffer.getvalue()
+        buffer.close()
+        return pdf
+    except Exception as e:
+        st.error(f"Error generating PDF: {str(e)}")
+        return None
+
+# Sidebar for input form
+with st.sidebar:
+    st.header("Project Preferences")
+    
+    # User Input Form
+    field = st.selectbox(
+        "Field of Interest",
+        ["AI", "Web Dev", "Mobile Dev", "IoT", "Data Science", "Environment", "Cybersecurity", 
+         "Blockchain", "Game Development", "AR/VR", "Hybrid (Interdisciplinary)"]
+    )
+    
+    # If hybrid is selected, show additional field
+    if field == "Hybrid (Interdisciplinary)":
+        primary_field = st.selectbox(
+            "Primary Field",
+            ["AI", "Web Dev", "Mobile Dev", "IoT", "Data Science", "Environment", "Cybersecurity", 
+             "Blockchain", "Game Development", "AR/VR"]
+        )
+        secondary_field = st.selectbox(
+            "Secondary Field",
+            ["Healthcare", "Finance", "Education", "Entertainment", "Social Good", "Environment", 
+             "Transportation", "Retail", "Manufacturing", "Agriculture"]
+        )
+    
+    academic_level = st.selectbox(
+        "Academic Level",
+        ["High School", "Undergraduate", "Graduate", "Self-Taught"]
+    )
+    
+    # Multi-select for skills
+    skills = st.multiselect(
+        "Skills Known",
+        ["Python", "JavaScript", "HTML/CSS", "Java", "C++", "React", "Node.js", 
+         "Machine Learning", "Data Analysis", "Mobile Development", "IoT", "Cloud Computing",
+         "SQL", "NoSQL", "AWS", "Azure", "Docker", "Kubernetes", "Git", "Unity", "Swift"]
+    )
+    
+    project_type = st.selectbox(
+        "Type of Project",
+        ["Minor", "Medium", "Major", "Research-based"]
+    )
+    
+    # Generate ideas button
+    if st.button("Generate Project Ideas", key="generate_ideas"):
+        if not st.session_state.api_key_configured:
+            st.error("Please configure your Gemini API key first")
+        else:
+            with st.spinner("Generating project ideas with AI..."):
+                # Generate project ideas using Gemini AI
+                if field == "Hybrid (Interdisciplinary)":
+                    ai_ideas = generate_hybrid_ideas(primary_field, secondary_field, skills)
+                else:
+                    ai_ideas = generate_ai_project_ideas(field, academic_level, skills, project_type)
+                
+                if ai_ideas:
+                    st.session_state.generated_ideas = ai_ideas
+                    st.session_state.visualization_mode = "ideas"
+                    st.success(f"Generated {len(ai_ideas)} project ideas!")
+                else:
+                    st.error("Failed to generate project ideas. Please try again.")
+    
+    # Trending topics section
+    st.header("Trending Topics")
+    trending_topics = ["Generative AI", "Edge Computing", "Sustainability Tech", "Web3", "AR/VR", "Quantum Computing"]
+    
+    # Button to quickly generate ideas based on trending topics
+    if st.button("Explore Trending Ideas"):
+        if not st.session_state.api_key_configured:
+            st.error("Please configure your Gemini API key first")
+        else:
+            with st.spinner("Generating ideas based on trending topics..."):
+                # Choose a random trending topic
+                random_topic = random.choice(trending_topics)
+                
+                prompt = f"""
+                Generate 3 project ideas related to the trending topic: {random_topic}
+                
+                For each project idea, provide:
+                1. Title: A concise, descriptive name for the project
+                2. Description: Brief explanation of what the project does
+                3. Tools: List of 3-5 specific technologies, frameworks, or languages needed for the project
+                4. Difficulty: A rating (Beginner, Intermediate, or Advanced)
+                
+                Format each project idea as a JSON object. Return ONLY a valid JSON array containing the 3 project ideas.
+                """
+                
+                # Generate ideas
+                model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+                response = model.generate_content(prompt)
+                
+                # Process the response
+                json_pattern = r'json\s*([\s\S]*?)\s*|\s*([\s\S]*?)\s*|\[\s*{\s*"title"[\s\S]?\}\s\]'
+                json_match = re.search(json_pattern, response.text)
+                
+                if json_match:
+                    json_str = json_match.group(1) or json_match.group(2) or json_match.group(0)
+                else:
+                    json_str = response.text
+                
+                # Clean up JSON
+                json_str = json_str.strip()
+                if not json_str.startswith('['):
+                    json_str = '[' + json_str
+                if not json_str.endswith(']'):
+                    json_str = json_str + ']'
+                
+                # Parse ideas
+                trend_ideas = json.loads(json_str)
+                
+                # Add trending topic tag to each idea
+                for idea in trend_ideas:
+                    idea['trending_topic'] = random_topic
+                
+                st.session_state.generated_ideas = trend_ideas
+                st.session_state.visualization_mode = "ideas"
+                st.success(f"Generated {len(trend_ideas)} ideas related to {random_topic}!")
+
+# Main content area
+if st.session_state.generated_ideas:
+    # Display p5.js visualization based on current mode
+    if st.session_state.visualization_mode == "ideas":
+        st.header("Project Ideas Visualization")
+        p5_ideas_html = create_ideas_visualization(st.session_state.generated_ideas)
+        components.html(p5_ideas_html, height=350)
+    elif st.session_state.visualization_mode == "roadmap" and st.session_state.roadmap and st.session_state.selected_idea:
+        st.header("Project Roadmap Visualization")
+        p5_roadmap_html = create_roadmap_visualization(st.session_state.roadmap, st.session_state.selected_idea['title'])
+        components.html(p5_roadmap_html, height=450)
+    
+    # Display generated ideas in cards
+    st.header("Generated Project Ideas")
+    
+    # Create columns for better layout
+    cols = st.columns(min(3, len(st.session_state.generated_ideas)))
+    
+    # Display ideas with selection capability
+    for i, idea in enumerate(st.session_state.generated_ideas):
+        with cols[i % len(cols)]:
+            # st.markdown(f"<div class='card'>", unsafe_allow_html=True)
+            st.markdown(f"### {i+1}. {idea['title']}")
+            st.markdown(f"*Difficulty:* {idea['difficulty']}")
+            st.write(f"*Description:* {idea['description']}")
+            st.write(f"*Tools:* {', '.join(idea['tools'])}")
+            
+            # Display domains for hybrid ideas if available
+            if 'domains' in idea:
+                st.write(f"*Domains:* {', '.join(idea['domains'])}")
+            
+            # Display trending topic if available
+            if 'trending_topic' in idea:
+                st.markdown(f"<span style='background-color: #e6f7ff; padding: 3px 8px; border-radius: 10px;'>🔥 {idea['trending_topic']}</span>", unsafe_allow_html=True)
+            
+            # Button to select this idea for roadmap
+            if st.button(f"Select Project", key=f"select_{i}"):
+                st.session_state.selected_idea = idea
+                st.session_state.roadmap = None  # Reset roadmap
+                st.session_state.visualization_mode = "ideas"  # Reset visualization mode
+                st.rerun()  # Refresh to show roadmap section
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# Generate and display roadmap if an idea is selected
+if st.session_state.selected_idea and not st.session_state.roadmap:
+    if st.session_state.api_key_configured:
+        with st.spinner("Generating project roadmap with AI..."):
+            # Generate roadmap using Gemini AI
+            ai_roadmap = generate_ai_roadmap(st.session_state.selected_idea)
+            
+            if ai_roadmap:
+                st.session_state.roadmap = ai_roadmap
+                st.session_state.visualization_mode = "roadmap"  # Switch to roadmap visualization
+                st.success("Roadmap generated successfully!")
+            else:
+                st.error("Failed to generate roadmap. Please try again.")
+    else:
+        st.error("Please configure your Gemini API key to generate roadmaps")
+
+# Display roadmap if available
+if st.session_state.selected_idea and st.session_state.roadmap:
+    st.header(f"Project Roadmap: {st.session_state.selected_idea['title']}")
+    
+    # Toggle button for visualization
+    viz_col1, viz_col2 = st.columns([1, 3])
+    with viz_col1:
+        if st.button("Show Timeline View" if st.session_state.visualization_mode != "roadmap" else "Hide Timeline View"):
+            st.session_state.visualization_mode = "roadmap" if st.session_state.visualization_mode != "roadmap" else "ideas"
+            st.rerun()
+    
+    # Display the roadmap in a more visually appealing way
+    for i, week in enumerate(st.session_state.roadmap):
+        with st.expander(f"{week['week']}: {week['title']}", expanded=(i == 0)):
+            cols = st.columns([2, 1])
+            
+            with cols[0]:
+                st.subheader("Tasks")
+                for task in week['tasks']:
+                    st.markdown(f"<div style='margin-bottom:8px;'><span class='step-number'>{week['tasks'].index(task) + 1}</span> {task}</div>", unsafe_allow_html=True)
+            
+            with cols[1]:
+                st.subheader("Learning Resources")
+                for resource in week['resources']:
+                    st.markdown(f"<div class='resource-card'>{resource}</div>", unsafe_allow_html=True)
+    
+    # Export options
+    st.header("Export Options")
+    
+    export_col1, export_col2 = st.columns(2)
+    
+    with export_col1:
+        if st.button("Generate PDF", key="gen_pdf"):
+            with st.spinner("Creating PDF..."):
+                pdf = export_to_pdf(st.session_state.selected_idea, st.session_state.roadmap)
+                
+                if pdf:
+                    # Create download button using HTML
+                    html = create_download_link(pdf, f"{st.session_state.selected_idea['title']}_project_plan.pdf")
+                    st.markdown(html, unsafe_allow_html=True)
+    
+    with export_col2:
+        # Option to save to session or clear
+        if st.button("Start Over", key="start_over"):
+            st.session_state.selected_idea = None
+            st.session_state.roadmap = None
+            st.session_state.generated_ideas = []
+            st.session_state.visualization_mode = "ideas"
+            st.rerun()
+
+# Skill gap analyzer for selected project
+if st.session_state.selected_idea and skills:
+    st.header("Skill Gap Analysis")
+    
+    # Compare required skills vs. known skills
+    required_tools = st.session_state.selected_idea['tools']
+    
+    # Identify gaps - simple string matching for demonstration
+    skill_gaps = []
+    for tool in required_tools:
+        is_known = any(skill.lower() in tool.lower() or tool.lower() in skill.lower() for skill in skills)
+        
+        if not is_known:
+            skill_gaps.append(tool)
+    
+    # Create progress bar showing skill readiness
+    readiness_percentage = 100 - (len(skill_gaps) / len(required_tools) * 100)
+    st.markdown(f"### Project Skill Readiness: {readiness_percentage:.0f}%")
+    st.progress(readiness_percentage / 100)
+    
+    if skill_gaps:
+        st.write("*Skills you need to learn:*")
+        
+        gap_cols = st.columns(min(3, len(skill_gaps)))
+        
+        for i, skill in enumerate(skill_gaps):
+            with gap_cols[i % len(gap_cols)]:
+                st.markdown(f"<div class='card' style='background:#000000;'>", unsafe_allow_html=True)
+                st.markdown(f"#### {skill}")
+                
+                # If API is configured, we could generate learning resources for each gap
+                if st.session_state.api_key_configured and st.button(f"Get resources", key=f"resource_{skill}"):
+                    with st.spinner(f"Finding learning resources for {skill}..."):
+                        try:
+                            # Create a prompt for the Gemini API
+                            prompt = f"Suggest 3 best learning resources (courses, tutorials, books) for learning {skill}. Format as a bullet list with brief descriptions."
+                            
+                            # Configure the model
+                            model = genai.GenerativeModel("gemini-1.0-pro")
+                            
+                            # Generate content
+                            response = model.generate_content(prompt)
+                            
+                            # Display resources
+                            st.write(response.text)
+                        except Exception as e:
+                            st.error(f"Error finding resources: {str(e)}")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.success("Great! You already have all the skills needed for this project.")
+
+# Show intro message when no ideas have been generated yet
+if not st.session_state.generated_ideas:
+    st.write("### Welcome to the AI-Powered Student Project Generator!")
+    
+    # Create a more visually appealing intro with columns
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.write("""
+        This tool helps you discover project ideas tailored to your interests and skills, generated by AI and visualized with p5.js.
+        
+        #### Key Features:
+        - *Interactive Idea Generation*: Get AI-powered project suggestions based on your interests and skills
+        - *Visual Project Exploration*: Explore project ideas through interactive visualizations
+        - *Detailed Roadmaps*: Get week-by-week plans with tasks and resources
+        - *Skill Gap Analysis*: Find out what skills you need to learn
+        - *Export Options*: Save your project plan as PDF
+        """)
+    
+    with col2:
+        # Simulated p5.js preview
+        st.markdown("""
+        <div style="border:2px dashed #ccc; border-radius:5px; padding:10px; text-align:center; height:200px; display:flex; justify-content:center; align-items:center; flex-direction:column;">
+            <div style="font-size:24px;">🚀</div>
+            <div style="font-size:16px; margin-top:10px;">Interactive Visualizations</div>
+            <div style="font-size:12px; margin-top:5px; color:#666;">Generate ideas to see them</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    #### How to get started:
+    1. Enter your Google Gemini API key in the sidebar
+    2. Fill in your preferences and skills
+    3. Click 'Generate Project Ideas'
+    4. Select an idea to see a detailed roadmap
+    5. Export your project plan for reference
+    """)
+    
+    # Display note about API key
+    st.info("Note: You need a Google Gemini API key to use this application. If you don't have one, you can get it from the Google AI Studio (https://makersuite.google.com/).")
+
+# Footer
+st.markdown("---")
+st.markdown("AI-Powered Project Generator | Built with Streamlit, p5.js, and Google Gemini API")
+
+# Add a custom modal dialog using HTML/JS for voice input (simulated functionality)
+voice_dialog_html = """
+<script>
+function openVoiceModal() {
+    document.getElementById('voiceModal').style.display = 'block';
+    // Simulate recording for 3 seconds
+    setTimeout(function() {
+        document.getElementById('recordingIndicator').innerHTML = "Processing...";
+        // Simulate processing
+        setTimeout(function() {
+            document.getElementById('voiceModal').style.display = 'none';
+            // This would typically send data back to Streamlit
+        }, 2000);
+    }, 3000);
+}
+
+function closeVoiceModal() {
+    document.getElementById('voiceModal').style.display = 'none';
+}
+</script>
+
+<div id="voiceModal" style="display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5);">
+    <div style="margin:15% auto; padding:20px; width:300px; background-color:white; border-radius:10px; text-align:center;">
+        <h3>Voice Input</h3>
+        <p id="recordingIndicator">Listening...</p>
+        <div style="width:50px; height:50px; background-color:#f44336; border-radius:50%; margin:20px auto; animation:pulse 1.5s infinite;"></div>
+        <button onclick="closeVoiceModal()" style="padding:8px 16px; background-color:#ddd; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
+        <style>
+            @keyframes pulse {
+                0% { transform: scale(1); opacity: 1; }
+                50% { transform: scale(1.2); opacity: 0.7; }
+                100% { transform: scale(1); opacity: 1; }
+            }
+        </style>
+    </div>
+</div>
+
+<button onclick="openVoiceModal()" style="position:fixed; bottom:20px; right:20px; width:60px; height:60px; border-radius:50%; background-color:#4CAF50; color:white; border:none; font-size:24px; cursor:pointer; box-shadow:0 4px 8px rgba(0,0,0,0.3);">🎤</button>
+"""
+
+# Render the voice input button
+components.html(voice_dialog_html, height=0)
+Front-end:
+
+Streamlit: The main framework used to build the web application interface
+HTML/CSS: Custom styling embedded within the Streamlit app
+JavaScript: Used for interactive components and visualizations
+p5.js: JavaScript library for creating interactive visualizations of project ideas and roadmaps
+
+Back-end:
+
+Python: The core programming language for the application
+Google Generative AI (Gemini): AI model used to generate project ideas and roadmaps
+
+Specifically uses Gemini 1.5 Flash and Gemini 1.0 Pro models
+
+
+
+Data Processing:
+
+pandas: Python library for data manipulation
+json: For handling JSON data structure
+re: Regular expression module for processing AI responses
+
+Export & File Handling:
+
+base64: For encoding data for downloads
+BytesIO: For in-memory file operations
+reportlab: PDF generation library (used in the export_to_pdf function)
+
+Additional Components:
+
+datetime: For timestamp generation
+random: For selecting random trending topics
+streamlit.components.v1: For embedding custom HTML/JS components

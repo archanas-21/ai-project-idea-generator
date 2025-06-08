@@ -348,7 +348,7 @@ def create_roadmap_visualization(roadmap_data, project_title):
 # Gemini API Configuration
 with st.sidebar:
     # st.header("API Configuration")
-    gemini_api_key = "AIzaSyBf9mkSpiiabc0bE6C8byYWIHBJ8bF_1mA"
+    gemini_api_key = " process.env.GOOGLE_API_KEY"
     
     if gemini_api_key:
         try:
